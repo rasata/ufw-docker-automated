@@ -24,9 +24,9 @@ This project solves that problem by listening to the Docker API events.
 | Label key      | Value / Syntax                                                   | Example                                                     |
 | -------------- | ---------------------------------------------------------------- | ----------------------------------------------------------- |
 | UFW_MANAGED    | TRUE _(Required for all rules)_                                  | `-l UFW_MANAGED=TRUE`                                       |
-| UFW_ALLOW_FROM | CIDR/IP-SpecificPort-Comment , Semicolon separated, default=any  | `-l UFW_ALLOW_FROM=192.168.3.0/24-LAN;10.10.0.50/32-53-DNS` |
+| UFW_ALLOW_FROM | CIDR/IP-SpecificPort-Comment , Semicolon separated, default=any  | `-l UFW_ALLOW_FROM=192.168.3.0/24-LAN;10.10.0.50/32-53-DNS;fe80::/64-IPv6Subnet` |
 | UFW_DENY_OUT   | TRUE _(Required if outbound rules are defined)_                  | `-l UFW_DENY_OUT=TRUE`                                      |
-| UFW_ALLOW_TO   | CIDR/IP-SpecificPort-Comment , Semicolon separated, default=none | `-l UFW_ALLOW_TO=192.168.3.0/24-LAN;10.10.0.50/32-53-DNS`   |
+| UFW_ALLOW_TO   | CIDR/IP-SpecificPort-Comment , Semicolon separated, default=none | `-l UFW_ALLOW_TO=192.168.3.0/24-LAN;10.10.0.50/32-53-DNS;fe80::1-IPv6Dns`   |
 
 ## Example
 
@@ -41,9 +41,9 @@ services:
       - '8081:81'
     labels:
       UFW_MANAGED: 'TRUE'
-      UFW_ALLOW_FROM: '172.10.50.32;192.168.3.0/24;10.10.0.50/32-8080-LAN'
+      UFW_ALLOW_FROM: '172.10.50.32;192.168.3.0/24;10.10.0.50/32-8080-LAN;fe80::/64-IPv6Subnet'
       UFW_DENY_OUT: 'TRUE'
-      UFW_ALLOW_TO: '8.8.8.8-53-GoogleDNS;1.1.1.0/24-53-CloudflareDNS;192.168.10.24-8080-LAN'
+      UFW_ALLOW_TO: '8.8.8.8-53-GoogleDNS;1.1.1.0/24-53-CloudflareDNS;192.168.10.24-8080-LAN;2606:4700:4700::1111-CloudflareDNS;2001:4860:4860::8888-GoogleDNS;fe80::/64-IPv6Subnet'
     networks:
       - my-network
 
@@ -118,7 +118,7 @@ Once containers are stopped their ufw entries will be deleted.
 
 ## Installation
 
-**Step 1**. Install [_ufw-docker_](https://github.com/chaifeng/ufw-docker#solving-ufw-and-docker-issues)'s firewall rules on your ufw configuration file.
+**Step 1**. Install [_ufw-docker_](https://github.com/chaifeng/ufw-docker/pull/92)'s firewall rules on your ufw configuration file.
 
 Open up `/etc/ufw/after.rules` file and add following code to the bottom of the file.
 
@@ -150,9 +150,37 @@ Open up `/etc/ufw/after.rules` file and add following code to the bottom of the 
 
 COMMIT
 # END UFW AND DOCKER
+
 ```
 
-**Step 2**. Reload your ufw service to take effect of new configuration.
+**Step 2**. Open up `/etc/ufw/after6.rules` file and add following code to the bottom of the file.
+
+```conf
+# BEGIN UFW AND DOCKER
+*filter
+:ufw6-user-forward - [0:0]
+:ufw6-docker-logging-deny - [0:0]
+:DOCKER-USER - [0:0]
+-A DOCKER-USER -j ufw6-user-forward
+
+-A DOCKER-USER -j RETURN -s 2001:db8:1::/64
+
+-A DOCKER-USER -p udp -m udp --sport 53 --dport 1024:65535 -j RETURN
+
+-A DOCKER-USER -j ufw6-docker-logging-deny -p tcp -m tcp --tcp-flags FIN,SYN,RST,ACK SYN -d 2001:db8:1::/64
+-A DOCKER-USER -j ufw6-docker-logging-deny -p udp -m udp --dport 0:32767 -d 2001:db8:1::/64
+
+-A DOCKER-USER -j RETURN
+
+-A ufw6-docker-logging-deny -m limit --limit 3/min --limit-burst 10 -j LOG --log-prefix "[UFW DOCKER BLOCK] "
+-A ufw6-docker-logging-deny -j DROP
+
+COMMIT
+# END UFW AND DOCKER
+
+```
+
+**Step 3**. Reload your ufw service to take effect of new configuration.
 
 ```sh
 sudo ufw reload
@@ -166,11 +194,11 @@ sudo service ufw restart
 sudo systemctl restart ufw
 ```
 
-**Step 3**. Download ufw-docker-automated binary
+**Step 4**. Download ufw-docker-automated binary
 
 Download the [latest release](https://github.com/shinebayar-g/ufw-docker-automated/releases/latest) of the project.
 
-**Step 4**. Run the app
+**Step 5**. Run the app
 
 To manage ufw rules, binary has to run as a root privileged user.
 
